@@ -1,4 +1,5 @@
 from django.shortcuts import render
+from django.db.models import Prefetch
 from rest_framework.response import Response
 from rest_framework import status
 
@@ -13,6 +14,45 @@ from bs4 import BeautifulSoup
 
 """ Imports from rest framework """
 from rest_framework.views import APIView
+from rest_framework.pagination import PageNumberPagination
+from rest_framework import generics
+
+# """ Import from Utils here """
+from utils.response import (
+    create_bad_request_response,
+    create_internal_server_error_response,
+    create_success_response,
+)
+
+from utils.helper_function import BasicPagination
+
+""" Import From Form """
+from .forms import ScrapRequestForm, TranslateContentForm
+
+""" Import Schema """
+from .schema import request_schema
+
+""" Import Swagger here """
+from drf_yasg.utils import swagger_auto_schema
+
+""" Import Serializers """
+from .serializers import (
+    UserScrapHistorySerializer,
+    UserScrapHistoryListSerializer,
+    ScrapTranslatedContentSerializer,
+    GetUserScrapHistoryListSerializer
+)
+
+from account.serializers import UserListViewSerializer
+
+""" Import Modals """
+from .models import UserScrapHistory, ScrapTranslatedContent
+from account.models import CustomUser
+from django.db.models import Q
+
+""" Import Django Filters """
+import django_filters
+from django_filters.rest_framework import DjangoFilterBackend
 
 
 jasper_key = (
@@ -271,8 +311,11 @@ JASPER_JSON_REFERENCE = [
 
 JASPER_JSON_REFERENCE_V2 = [
     {
-        "PRODUCT_NAME": {
+        "PRODUCT_NAME_IN_ENGLISH": {
             "product_link": "",
+            "english_language_name": "",
+            "english_language_description": "",
+            "english_language_price": "",
             "language_first_language_name": "",
             "language_first_language_description": "",
             "language_first_language_price": "",
@@ -285,6 +328,38 @@ JASPER_JSON_REFERENCE_V2 = [
         }
     }
 ]
+
+
+def create_jasper_json_reference(product_name, languages):
+    """
+    Create a dynamic JASPER JSON reference structure based on provided languages.
+
+    Args:
+        product_name (str): Product name in English.
+        languages (list): List of languages to include.
+
+    Returns:
+        dict: JASPER JSON reference structure.
+    """
+    # Base structure for English
+    language_structure = {
+        "product_link": "",
+        "english_language_name": "",
+        "english_language_description": "",
+        "english_language_price": "",
+    }
+
+    # Dynamically add fields for each language
+    for index, lang in enumerate(languages):
+        prefix = f"{lang.lower()}_language"
+        language_structure[f"{prefix}_name"] = ""
+        language_structure[f"{prefix}_description"] = ""
+        language_structure[f"{prefix}_price"] = ""
+
+    # Create final structured JSON
+    jasper_json = {product_name: language_structure}
+
+    return jasper_json
 
 
 def get_scrapper_data(url):
@@ -307,6 +382,7 @@ def get_scrapper_data(url):
                 "price": product_price_text,
                 "name": product_name_text,
                 "description": product_description_text,
+                "url": url,
             }
             return payload
         else:
@@ -333,7 +409,7 @@ def get_jasper_translation(text, target_language):
         payload = {
             "inputs": {
                 "command": str(text),
-                "context": f"Translate this into {target_language}",
+                "context": f"Translate this into {target_language} and don't miss any language.Output should be in text. Each of the product transalated data add some divider or seprrator to verify different products with all the languages.",
             },
             "options": JASPER_API_OPTION,
         }
@@ -355,7 +431,7 @@ def get_jasper_translation(text, target_language):
         return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
-def get_jasper_json_data(text):
+def get_jasper_json_data(text, languages, product_names):
     """
     Converts given text into a JSON format using Jasper API.
 
@@ -369,10 +445,14 @@ def get_jasper_json_data(text):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        languages_results = create_jasper_json_reference(
+            "product_name_in_english", languages
+        )
+
         payload = {
             "inputs": {
                 "command": str(text),
-                "context": f"Convert the following data into JSON format. Ensure that all language-specific product details are combined into a single object per product, with each language's fields prefixed accordingly, don't miss any data and languages. Follow this structure: {JASPER_JSON_REFERENCE_V2}.",
+                "context": f"Convert the following data into JSON format. Ensure that all language-specific product details are combined into a single object per product, with each language's fields prefixed accordingly, don't miss any data and languages. Follow this structure: {[languages_results]}. and don't miss any language. product_name_in_english key should be match from this array of products {product_names} and object should be match same as {[languages_results]}.",
             },
             "options": JASPER_API_OPTION,
         }
@@ -409,6 +489,40 @@ def get_jasper_json_data(text):
         return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
+def convert_content_to_json_data(text):
+    try:
+        if not text:
+            return Response(
+                {"error": "Missing required parameters"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        payload = {
+            "inputs": {
+                "command": str(text),
+                "context": f"Convert the following data into JSON format properly.json shouldn't have any parent key, and inside of the json also don't add any parent key",
+            },
+            "options": JASPER_API_OPTION,
+        }
+
+        response = requests.post(
+            JASPER_API_URL, json=payload, headers=JASPER_API_HEADERS
+        )
+        response_data = response.json()
+        json_text_parts = response_data["data"][0]["text"].split("```json")
+        if len(json_text_parts) < 2:
+            return Response(
+                {"error": "Invalid JSON format received from API"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+        json_block = json_text_parts[1].split("```")[0].strip()
+        parsed_json = json.loads(json_block)
+
+        return parsed_json
+    except Exception as e:
+        return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
 class WebScrapperV2(APIView):
     def post(self, request):
         try:
@@ -417,14 +531,16 @@ class WebScrapperV2(APIView):
                 languages = request.data["languages"]
                 combined_languages = ["English"] + languages
                 scrapped_data = []
-                for url in urls:
+                for index, url in enumerate(urls):
                     sd = get_scrapper_data(url=url)
                     scrapped_data.append(sd)
                 jasper_translated_data = get_jasper_translation(
                     str(scrapped_data), combined_languages
                 )
                 jasper_translated_data = jasper_translated_data["data"][0]["text"]
-                json_data = get_jasper_json_data(jasper_translated_data)
+                json_data = get_jasper_json_data(
+                    jasper_translated_data, combined_languages
+                )
                 return Response(
                     {"data": jasper_translated_data, "json": json_data["data"]},
                     status=status.HTTP_200_OK,
@@ -447,16 +563,21 @@ class WebScrapperV3(APIView):
                 urls = request.data["url"]
                 languages = request.data["languages"]
                 combined_languages = languages + ["English"]
+                product_names = []
+
                 scrapped_data = []
-                for url in urls:
+                for index, url in enumerate(urls):
                     sd = get_scrapper_data(url=url)
                     sd["product_link"] = url
+                    product_names.append(sd["name"])
                     scrapped_data.append(sd)
                 jasper_translated_data = get_jasper_translation(
                     combined_languages, str(scrapped_data)
                 )
                 jasper_translated_data = jasper_translated_data["data"][0]["text"]
-                json_data = get_jasper_json_data(jasper_translated_data)
+                json_data = get_jasper_json_data(
+                    jasper_translated_data, combined_languages, product_names
+                )
                 return Response(
                     {"data": jasper_translated_data, "json": json_data["data"]},
                     status=status.HTTP_200_OK,
@@ -470,3 +591,282 @@ class WebScrapperV3(APIView):
             return Response(
                 {"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
+
+
+class UserScraperAPIView(APIView):
+
+    @swagger_auto_schema(tags=["User Scraper"])
+    def get(self, request):
+        try:
+            da = UserScrapHistory.objects.all()
+            sdd = UserScrapHistorySerializer(da, many=True).data
+            return create_success_response(message="Scraping successful", data=sdd)
+        except Exception as e:
+            return create_internal_server_error_response(exception=str(e))
+
+    @swagger_auto_schema(
+        tags=["User Scraper"],
+        request_body=request_schema,
+    )
+    def post(self, request):
+        try:
+            # Validate request data using form
+            scrap_form = ScrapRequestForm(data=request.data)
+            if not scrap_form.is_valid():
+                return create_bad_request_response(errors=scrap_form.errors)
+
+            # Extract request data
+            user_id = request.data["user"]
+            urls = request.data["urls"]
+            search_keywords = request.data["search_keywords"]
+            metadata_fields = request.data["metadata_fields"]
+
+            # Scrape data efficiently using list comprehension
+            scraped_data = [get_scrapper_data(url) for url in urls]
+
+            # Save history record
+            history_data = {
+                "user": user_id,
+                "urls": urls,
+                "search_keywords": search_keywords,
+                "metadata_fields": metadata_fields,
+                "scrap_data": scraped_data,
+            }
+
+            history_serializer = UserScrapHistorySerializer(data=history_data)
+            if history_serializer.is_valid():
+                history_serializer.save()
+                saved_id = history_serializer.instance.id
+            else:
+                return create_bad_request_response(errors=history_serializer.errors)
+
+            return create_success_response(
+                message="Scraping successful",
+                data={"scraped_data": scraped_data, "scraped_id": saved_id},
+            )
+
+        except Exception as e:
+            return create_internal_server_error_response(exception=str(e))
+
+
+class GetScrapperData(APIView):
+    def get(self, request, *args, **kwargs):
+        try:
+            scrapped_id = kwargs["scrapped_id"]
+            scrapped_data = UserScrapHistory.objects.get(id=scrapped_id)
+            scrapped_data_serializer = UserScrapHistorySerializer(scrapped_data).data
+            return create_success_response(
+                message="Scraping successful",
+                data={"scraped_data": scrapped_data_serializer},
+            )
+        except Exception as e:
+            return create_internal_server_error_response(exception=str(e))
+
+
+class UserScrapperFilter(django_filters.FilterSet):
+    urls = django_filters.CharFilter(lookup_expr="icontains")
+    search_keywords = django_filters.CharFilter(lookup_expr="icontains")
+    metadata_fields = django_filters.CharFilter(lookup_expr="icontains")
+    scrap_data = django_filters.CharFilter(lookup_expr="icontains")
+    user = django_filters.CharFilter(method="filter_created_by")
+
+    class Meta:
+        model = UserScrapHistory
+        fields = ["urls", "search_keywords", "metadata_fields", "scrap_data", "user"]
+
+    def filter_created_by(self, queryset, name, value):
+        """
+        Filter by user_created_by's email, first_name, or last_name in a single filter.
+        """
+        return queryset.filter(
+            Q(user__id__icontains=value)
+            | Q(user__email__icontains=value)
+            | Q(user__first_name__icontains=value)
+            | Q(user__last_name__icontains=value)
+        )
+
+
+@swagger_auto_schema(tags=["Search User Scrapper"])
+class UserScrapperPaginatedView(generics.ListAPIView):
+    serializer_class = UserScrapHistoryListSerializer
+    filter_backends = [DjangoFilterBackend]
+    filterset_class = UserScrapperFilter
+    pagination_class = BasicPagination
+
+    def get_queryset(self):
+        requested_user_id = self.request.query_params.get("user_id")
+
+        if not requested_user_id:
+            return UserScrapHistory.objects.none()
+
+        try:
+            requested_user = CustomUser.objects.get(id=requested_user_id)
+            user_serialized_data = UserListViewSerializer(requested_user).data
+
+            if user_serialized_data["user_role"]["name"] == "SuperAdmin":
+                return UserScrapHistory.objects.all().order_by("-created_at")
+            else:
+                return UserScrapHistory.objects.filter(user=requested_user).order_by(
+                    "-created_at"
+                )
+
+        except CustomUser.DoesNotExist:
+            return UserScrapHistory.objects.none()
+
+
+class DeleteHistory(APIView):
+    def get(self, request, *args, **kwargs):
+        try:
+            history_id = kwargs['history_id']
+            history_data = (
+                UserScrapHistory.objects.prefetch_related("user_scrap_history") 
+                .get(id=history_id)
+            )
+            serialized_history_data = GetUserScrapHistoryListSerializer(history_data).data
+            return create_success_response(message="History deleted successful", data=serialized_history_data)
+        except UserScrapHistory.DoesNotExist:
+            return create_bad_request_response(errors="History Does Not Exist")
+        except Exception as e:
+            return create_internal_server_error_response(exception=str(e))
+            
+    def delete(self, request, *args, **kwargs):
+        try:
+            history_id = kwargs['history_id']
+            history_data = UserScrapHistory.objects.get(id=history_id)
+            history_data.delete()
+            return create_success_response(message="History deleted successful")
+        except UserScrapHistory.DoesNotExist:
+            return create_bad_request_response(errors="History Does Not Exist")
+        except Exception as e:
+            return create_internal_server_error_response(exception=str(e))
+
+
+class TranslateContentAPI(APIView):
+    def post(self, request):
+        try:
+            data = request.data
+            translate_content_form = TranslateContentForm(data=data)
+            if not translate_content_form.is_valid():
+                return create_bad_request_response(errors=translate_content_form.errors)
+
+            content_id = data.get("content_id")
+            translated_languages = data.get("languages")
+
+            # Fetch user scrap history
+            try:
+                scrap_history = UserScrapHistory.objects.get(id=content_id)
+            except UserScrapHistory.DoesNotExist:
+                return create_bad_request_response(errors="Invalid content_id provided")
+
+            scrap_data = UserScrapHistorySerializer(scrap_history).data.get(
+                "scrap_data", []
+            )
+
+            translated_results = []
+
+            for content in scrap_data:
+                for language in translated_languages:
+                    if language is not "English":
+                        translation_response = get_jasper_translation(
+                            str(content), [language]
+                        )
+                        translated_text = translation_response.get("data", [{}])[0].get(
+                            "text", ""
+                        )
+                    else:
+                        translated_text = f"""---
+                            **{content['name']}**
+                            Price: {content['price']}
+                            Description: {content['description']}
+                            ---"""
+
+                    translated_results.append(
+                        {
+                            "language": language,
+                            "name": content.get("name", ""),
+                            "content": translated_text,
+                        }
+                    )
+
+                    # Save translation
+                    translation_entry = {
+                        "user_scrap_history": content_id,
+                        "language": language,
+                        "name": content.get("name", ""),
+                        "content": translated_text,
+                    }
+                    translation_serializer = ScrapTranslatedContentSerializer(
+                        data=translation_entry
+                    )
+
+                    if translation_serializer.is_valid():
+                        translation_serializer.save()
+            return create_success_response(
+                message="Translation successful",
+                data=translated_results,
+            )
+
+        except Exception as e:
+            return create_internal_server_error_response(exception=str(e))
+
+
+class GetTranslationResult(APIView):
+    def get(self, request, *args, **kwargs):
+        try:
+            transalated_content_id = kwargs["transalated_content"]
+            translated_content_data = ScrapTranslatedContent.objects.filter(
+                user_scrap_history=transalated_content_id
+            )
+
+            if not translated_content_data.exists():
+                return create_bad_request_response(errors="Invalid content_id provided")
+
+            translated_content_data_serialized = ScrapTranslatedContentSerializer(
+                translated_content_data, many=True
+            ).data
+
+            # Process content and convert to JSON
+            translated_content = [
+                {
+                    **tData,
+                    "content_json": convert_content_to_json_data(tData["content"]),
+                }
+                for tData in translated_content_data_serialized
+            ]
+
+            for tc in translated_content:
+                ScrapTranslatedContent.objects.filter(id=tc["id"]).update(
+                    content_json=tc["content_json"]
+                )
+
+            translated_content_data = ScrapTranslatedContent.objects.filter(
+                user_scrap_history=transalated_content_id
+            ).order_by("id")
+
+            translated_content_data_serialized = ScrapTranslatedContentSerializer(
+                translated_content_data, many=True
+            ).data
+            return create_success_response(
+                message="Translation successful",
+                data=translated_content_data_serialized,
+            )
+        except Exception as e:
+            return create_internal_server_error_response(exception=str(e))
+
+
+class GetScrapperTranslatedData(APIView):
+    def get(self, request, *args, **kwargs):
+        try:
+            scrapped_id = kwargs["scrapped_id"]
+            scrapped_data = ScrapTranslatedContent.objects.filter(
+                user_scrap_history=scrapped_id
+            )
+            scrapped_data_serializer = ScrapTranslatedContentSerializer(
+                scrapped_data, many=True
+            ).data
+            return create_success_response(
+                message="Scraping successful",
+                data={"scraped_data": scrapped_data_serializer},
+            )
+        except Exception as e:
+            return create_internal_server_error_response(exception=str(e))

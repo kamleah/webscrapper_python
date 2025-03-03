@@ -134,6 +134,7 @@ class UserListViewSerializer(serializers.ModelSerializer):
             "date_joined",
             "user_role",
             "user_created_by",
+            "process_type"
         ]
 
     def get_user_created_by(self, obj):

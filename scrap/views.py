@@ -176,6 +176,8 @@ web_scrapper_header = {
 """ JASPER API """
 jasper_api_endpoints = "https://api.jasper.ai/v1/command"
 
+prompt_1 = f"Translate this into {"target_language"} and don't miss any language.Output should be in text. Each of the product transalated data add some divider or seprrator to verify different products with all the languages."
+
 
 class WebScrapper(APIView):
     def post(self, request):
@@ -409,7 +411,11 @@ def get_jasper_translation(text, target_language):
         payload = {
             "inputs": {
                 "command": str(text),
-                "context": f"Translate this into {target_language} and don't miss any language.Output should be in text. Each of the product transalated data add some divider or seprrator to verify different products with all the languages.",
+                "context": f"Translate this into {target_language} without missing any details."
+                "The output should be in text format. Separate each product's translated data "
+                "with a clear divider or separator to distinguish between different products "
+                "and their respective languages."
+                "Transalate product name also in {target_language}",
             },
             "options": JASPER_API_OPTION,
         }
@@ -747,19 +753,21 @@ class DeleteHistory(APIView):
         except Exception as e:
             return create_internal_server_error_response(exception=str(e))
 
+
 def flatten_json(nested_dict, prefix=""):
     """Recursively flattens a nested JSON structure with prefixed keys."""
     flattened_dict = {}
-    
+
     for key, value in nested_dict.items():
         new_key = f"{prefix}_{key}" if prefix else key
-        
+
         if isinstance(value, dict):  # If value is a nested dictionary, recurse
             flattened_dict.update(flatten_json(value, new_key))
         else:
             flattened_dict[new_key] = value  # Assign the value directly
-            
+
     return flattened_dict
+
 
 def get_grouped_scraped_data_v1(scrapped_id):
     """
@@ -779,11 +787,13 @@ def get_grouped_scraped_data_v1(scrapped_id):
         grouped_data = defaultdict(lambda: {"product_name": None, "url": None})
 
         for scrapped_transalsted_data in scrapped_translate_data_serializer:
-            formatted_data = format_content_json(scrapped_transalsted_data["content_json"])
+            formatted_data = format_content_json(
+                scrapped_transalsted_data["content_json"]
+            )
             url = scrapped_transalsted_data["url"]
             product_name = scrapped_transalsted_data["name"]
             language = scrapped_transalsted_data["language"]
-            
+
             if not grouped_data[url]["product_name"]:
                 grouped_data[url]["product_name"] = product_name
                 grouped_data[url]["url"] = url
@@ -797,6 +807,7 @@ def get_grouped_scraped_data_v1(scrapped_id):
 
     except Exception as e:
         raise Exception(f"Error while fetching and grouping scraped data: {str(e)}")
+
 
 def get_grouped_scraped_data(scrapped_id):
     """
@@ -842,7 +853,8 @@ def get_grouped_scraped_data(scrapped_id):
 
     except Exception as e:
         raise Exception(f"Error while fetching and grouping scraped data: {str(e)}")
-    
+
+
 class TranslateContentAPI(APIView):
     def post(self, request):
         try:
@@ -904,8 +916,7 @@ class TranslateContentAPI(APIView):
 
                     if translation_serializer.is_valid():
                         translation_serializer.save()
-            
-            
+
             return create_success_response(
                 message="Translation successful",
                 data=translated_results,
@@ -954,8 +965,7 @@ class GetTranslationResult(APIView):
 
             grouped_list = get_grouped_scraped_data(transalated_content_id)
             return create_success_response(
-                message="Translation successful",
-                data=grouped_list
+                message="Translation successful", data=grouped_list
             )
         except Exception as e:
             return create_internal_server_error_response(exception=str(e))
@@ -1039,6 +1049,8 @@ def format_content_json(content_json):
 #             return create_internal_server_error_response(exception=str(e))
 
 from collections import defaultdict
+
+
 class DownloadScrapJsonV2(APIView):
     def post(self, request):
         try:
@@ -1053,10 +1065,14 @@ class DownloadScrapJsonV2(APIView):
                 scrapped_translate_data, many=True
             ).data
 
-            grouped_data = defaultdict(lambda: {"product_name": None, "translations": []})
+            grouped_data = defaultdict(
+                lambda: {"product_name": None, "translations": []}
+            )
 
             for scrapped_transalsted_data in scrapped_translate_data_serializer:
-                formatted_data = format_content_json(scrapped_transalsted_data["content_json"])
+                formatted_data = format_content_json(
+                    scrapped_transalsted_data["content_json"]
+                )
                 url = scrapped_transalsted_data["url"]
                 product_name = scrapped_transalsted_data["name"]
 
@@ -1065,14 +1081,20 @@ class DownloadScrapJsonV2(APIView):
                     grouped_data[url]["product_name"] = product_name
 
                 # Append translation details
-                grouped_data[url]["translations"].append({
-                    "content": formatted_data,
-                    "language": scrapped_transalsted_data["language"],
-                })
+                grouped_data[url]["translations"].append(
+                    {
+                        "content": formatted_data,
+                        "language": scrapped_transalsted_data["language"],
+                    }
+                )
 
             # Convert grouped_data dictionary into a list
             grouped_list = [
-                {"url": url, "product_name": data["product_name"], "translations": data["translations"]}
+                {
+                    "url": url,
+                    "product_name": data["product_name"],
+                    "translations": data["translations"],
+                }
                 for url, data in grouped_data.items()
             ]
 
@@ -1082,7 +1104,7 @@ class DownloadScrapJsonV2(APIView):
             )
         except Exception as e:
             return create_internal_server_error_response(exception=str(e))
-        
+
 
 class DownloadScrapJson(APIView):
     def post(self, request):
@@ -1090,7 +1112,9 @@ class DownloadScrapJson(APIView):
 
             scrapped_id = request.data.get("scrapped_id")
             if not scrapped_id:
-                return create_internal_server_error_response("Missing scrapped_id in request.")
+                return create_internal_server_error_response(
+                    "Missing scrapped_id in request."
+                )
 
             grouped_list = get_grouped_scraped_data(scrapped_id)
 

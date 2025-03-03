@@ -33,6 +33,7 @@ class ScrapTranslatedContent(models.Model):
         blank=True,
         related_name="user_scrap_history",
     )
+    url = models.TextField(null=True, blank=True)
     language = models.TextField(null=True, blank=True)
     name = models.TextField(null=True, blank=True)
     content = models.TextField(null=True, blank=True)
@@ -42,3 +43,5 @@ class ScrapTranslatedContent(models.Model):
     def __str__(self):
         return f"{self.id} | {self.language} | {self.name}"
     
+
+

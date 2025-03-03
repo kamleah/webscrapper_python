@@ -40,7 +40,7 @@ from .serializers import (
     UserScrapHistorySerializer,
     UserScrapHistoryListSerializer,
     ScrapTranslatedContentSerializer,
-    GetUserScrapHistoryListSerializer
+    GetUserScrapHistoryListSerializer,
 )
 
 from account.serializers import UserListViewSerializer
@@ -688,7 +688,7 @@ class UserScrapperFilter(django_filters.FilterSet):
 
 @swagger_auto_schema(tags=["Search User Scrapper"])
 class UserScrapperPaginatedView(generics.ListAPIView):
-    serializer_class = UserScrapHistoryListSerializer
+    serializer_class = GetUserScrapHistoryListSerializer
     filter_backends = [DjangoFilterBackend]
     filterset_class = UserScrapperFilter
     pagination_class = BasicPagination
@@ -704,10 +704,14 @@ class UserScrapperPaginatedView(generics.ListAPIView):
             user_serialized_data = UserListViewSerializer(requested_user).data
 
             if user_serialized_data["user_role"]["name"] == "SuperAdmin":
-                return UserScrapHistory.objects.all().order_by("-created_at")
+                return UserScrapHistory.objects.prefetch_related(
+                    "user_scrap_history"
+                ).order_by("-created_at")
             else:
-                return UserScrapHistory.objects.filter(user=requested_user).order_by(
-                    "-created_at"
+                return (
+                    UserScrapHistory.objects.filter(user=requested_user)
+                    .order_by("-created_at")
+                    .prefetch_related("user_scrap_history")
                 )
 
         except CustomUser.DoesNotExist:
@@ -717,21 +721,24 @@ class UserScrapperPaginatedView(generics.ListAPIView):
 class DeleteHistory(APIView):
     def get(self, request, *args, **kwargs):
         try:
-            history_id = kwargs['history_id']
-            history_data = (
-                UserScrapHistory.objects.prefetch_related("user_scrap_history") 
-                .get(id=history_id)
+            history_id = kwargs["history_id"]
+            history_data = UserScrapHistory.objects.prefetch_related(
+                "user_scrap_history"
+            ).get(id=history_id)
+            serialized_history_data = GetUserScrapHistoryListSerializer(
+                history_data
+            ).data
+            return create_success_response(
+                message="History deleted successful", data=serialized_history_data
             )
-            serialized_history_data = GetUserScrapHistoryListSerializer(history_data).data
-            return create_success_response(message="History deleted successful", data=serialized_history_data)
         except UserScrapHistory.DoesNotExist:
             return create_bad_request_response(errors="History Does Not Exist")
         except Exception as e:
             return create_internal_server_error_response(exception=str(e))
-            
+
     def delete(self, request, *args, **kwargs):
         try:
-            history_id = kwargs['history_id']
+            history_id = kwargs["history_id"]
             history_data = UserScrapHistory.objects.get(id=history_id)
             history_data.delete()
             return create_success_response(message="History deleted successful")
@@ -740,7 +747,102 @@ class DeleteHistory(APIView):
         except Exception as e:
             return create_internal_server_error_response(exception=str(e))
 
+def flatten_json(nested_dict, prefix=""):
+    """Recursively flattens a nested JSON structure with prefixed keys."""
+    flattened_dict = {}
+    
+    for key, value in nested_dict.items():
+        new_key = f"{prefix}_{key}" if prefix else key
+        
+        if isinstance(value, dict):  # If value is a nested dictionary, recurse
+            flattened_dict.update(flatten_json(value, new_key))
+        else:
+            flattened_dict[new_key] = value  # Assign the value directly
+            
+    return flattened_dict
 
+def get_grouped_scraped_data_v1(scrapped_id):
+    """
+    Retrieves and groups scraped product data by URL with translations.
+
+    :param scrapped_id: The ID of the scraped data entry.
+    :return: A list of grouped product data dictionaries.
+    """
+    try:
+        scrapped_translate_data = ScrapTranslatedContent.objects.filter(
+            user_scrap_history=scrapped_id
+        )
+        scrapped_translate_data_serializer = ScrapTranslatedContentSerializer(
+            scrapped_translate_data, many=True
+        ).data
+
+        grouped_data = defaultdict(lambda: {"product_name": None, "url": None})
+
+        for scrapped_transalsted_data in scrapped_translate_data_serializer:
+            formatted_data = format_content_json(scrapped_transalsted_data["content_json"])
+            url = scrapped_transalsted_data["url"]
+            product_name = scrapped_transalsted_data["name"]
+            language = scrapped_transalsted_data["language"]
+            
+            if not grouped_data[url]["product_name"]:
+                grouped_data[url]["product_name"] = product_name
+                grouped_data[url]["url"] = url
+
+            for key, value in formatted_data.items():
+                print(key)
+                print(language)
+                grouped_data[url][f"{language}_{key}"] = value
+
+        return list(grouped_data.values())
+
+    except Exception as e:
+        raise Exception(f"Error while fetching and grouping scraped data: {str(e)}")
+
+def get_grouped_scraped_data(scrapped_id):
+    """
+    Retrieves and groups scraped product data by URL with translations.
+
+    :param scrapped_id: The ID of the scraped data entry.
+    :return: A list of grouped product data dictionaries.
+    """
+    try:
+        scrapped_translate_data = ScrapTranslatedContent.objects.filter(
+            user_scrap_history=scrapped_id
+        )
+        scrapped_translate_data_serializer = ScrapTranslatedContentSerializer(
+            scrapped_translate_data, many=True
+        ).data
+
+        grouped_data = defaultdict(lambda: {"product_name": None, "url": None})
+
+        for scrapped_translated_data in scrapped_translate_data_serializer:
+            url = scrapped_translated_data.get("url", "N/A")  # Fallback if missing
+            product_name = scrapped_translated_data.get("name", "Unknown Product")
+            language = scrapped_translated_data.get("language", "unknown")
+
+            # Ensure content_json exists before processing
+            content_json = scrapped_translated_data.get("content_json", {})
+            if content_json.get("product"):
+                content_json = content_json.get("product")
+            else:
+                content_json = content_json
+
+            formatted_data = format_content_json(content_json) if content_json else {}
+            # print(formatted_data)
+            formatted_data = flatten_json(formatted_data)
+
+            if not grouped_data[url]["product_name"]:
+                grouped_data[url]["product_name"] = product_name
+                grouped_data[url]["url"] = url
+
+            for key, value in formatted_data.items():
+                grouped_data[url][f"{language}_{key}"] = value
+
+        return list(grouped_data.values())
+
+    except Exception as e:
+        raise Exception(f"Error while fetching and grouping scraped data: {str(e)}")
+    
 class TranslateContentAPI(APIView):
     def post(self, request):
         try:
@@ -794,6 +896,7 @@ class TranslateContentAPI(APIView):
                         "language": language,
                         "name": content.get("name", ""),
                         "content": translated_text,
+                        "url": content.get("url", ""),
                     }
                     translation_serializer = ScrapTranslatedContentSerializer(
                         data=translation_entry
@@ -801,6 +904,8 @@ class TranslateContentAPI(APIView):
 
                     if translation_serializer.is_valid():
                         translation_serializer.save()
+            
+            
             return create_success_response(
                 message="Translation successful",
                 data=translated_results,
@@ -846,9 +951,11 @@ class GetTranslationResult(APIView):
             translated_content_data_serialized = ScrapTranslatedContentSerializer(
                 translated_content_data, many=True
             ).data
+
+            grouped_list = get_grouped_scraped_data(transalated_content_id)
             return create_success_response(
                 message="Translation successful",
-                data=translated_content_data_serialized,
+                data=grouped_list
             )
         except Exception as e:
             return create_internal_server_error_response(exception=str(e))
@@ -858,6 +965,7 @@ class GetScrapperTranslatedData(APIView):
     def get(self, request, *args, **kwargs):
         try:
             scrapped_id = kwargs["scrapped_id"]
+
             scrapped_data = ScrapTranslatedContent.objects.filter(
                 user_scrap_history=scrapped_id
             )
@@ -867,6 +975,128 @@ class GetScrapperTranslatedData(APIView):
             return create_success_response(
                 message="Scraping successful",
                 data={"scraped_data": scrapped_data_serializer},
+            )
+        except Exception as e:
+            return create_internal_server_error_response(exception=str(e))
+
+
+def format_content_json(content_json):
+    formatted_data = {}
+
+    for key, value in content_json.items():
+        if isinstance(value, list):  # If value is a list, join elements with commas
+            formatted_data[key] = f"{key}: " + ", ".join(map(str, value))
+        elif isinstance(
+            value, dict
+        ):  # If value is a dictionary, format key-value pairs
+            formatted_data[key] = f"{key}: " + ", ".join(
+                f"{sub_key}: {sub_value}" for sub_key, sub_value in value.items()
+            )
+        else:  # If value is a string or number, keep it as is
+            formatted_data[key] = f"{key}: {value}"
+
+    return formatted_data
+
+
+# class DownloadScrapJsonV1(APIView):
+#     def post(self, request):
+#         try:
+#             scrapped_id = 79
+#             scrapped_data = UserScrapHistory.objects.get(id=scrapped_id)
+#             scrapped_serialized_data = UserScrapHistorySerializer(scrapped_data).data
+
+#             scrapped_translate_data = ScrapTranslatedContent.objects.filter(
+#                 user_scrap_history=scrapped_id
+#             )
+#             scrapped_translate_data_serializer = ScrapTranslatedContentSerializer(
+#                 scrapped_translate_data, many=True
+#             ).data
+
+#             dsd = []
+#             for index, scrapped_transalsted_data in enumerate(
+#                 scrapped_translate_data_serializer, start=1
+#             ):
+#                 formatted_data = format_content_json(
+#                     scrapped_transalsted_data["content_json"]
+#                 )
+#                 # print(f"{index}: {formatted_data}")
+#                 dsd.append(
+#                     {
+#                         "content": formatted_data,
+#                         "url": scrapped_transalsted_data["url"],
+#                         "product_name": scrapped_transalsted_data["name"],
+#                         "language":scrapped_transalsted_data["language"],
+#                     }
+#                 )
+
+#             print(dsd)
+
+#             return create_success_response(
+#                 message="Scraping successful",
+#                 data={"scraped_data": dsd},
+#             )
+#         except Exception as e:
+#             return create_internal_server_error_response(exception=str(e))
+
+from collections import defaultdict
+class DownloadScrapJsonV2(APIView):
+    def post(self, request):
+        try:
+            scrapped_id = 79
+            scrapped_data = UserScrapHistory.objects.get(id=scrapped_id)
+            scrapped_serialized_data = UserScrapHistorySerializer(scrapped_data).data
+
+            scrapped_translate_data = ScrapTranslatedContent.objects.filter(
+                user_scrap_history=scrapped_id
+            )
+            scrapped_translate_data_serializer = ScrapTranslatedContentSerializer(
+                scrapped_translate_data, many=True
+            ).data
+
+            grouped_data = defaultdict(lambda: {"product_name": None, "translations": []})
+
+            for scrapped_transalsted_data in scrapped_translate_data_serializer:
+                formatted_data = format_content_json(scrapped_transalsted_data["content_json"])
+                url = scrapped_transalsted_data["url"]
+                product_name = scrapped_transalsted_data["name"]
+
+                # Store product name (ensures it's not overwritten)
+                if not grouped_data[url]["product_name"]:
+                    grouped_data[url]["product_name"] = product_name
+
+                # Append translation details
+                grouped_data[url]["translations"].append({
+                    "content": formatted_data,
+                    "language": scrapped_transalsted_data["language"],
+                })
+
+            # Convert grouped_data dictionary into a list
+            grouped_list = [
+                {"url": url, "product_name": data["product_name"], "translations": data["translations"]}
+                for url, data in grouped_data.items()
+            ]
+
+            return create_success_response(
+                message="Scraping successful",
+                data={"scraped_data": grouped_list},
+            )
+        except Exception as e:
+            return create_internal_server_error_response(exception=str(e))
+        
+
+class DownloadScrapJson(APIView):
+    def post(self, request):
+        try:
+
+            scrapped_id = request.data.get("scrapped_id")
+            if not scrapped_id:
+                return create_internal_server_error_response("Missing scrapped_id in request.")
+
+            grouped_list = get_grouped_scraped_data(scrapped_id)
+
+            return create_success_response(
+                message="Scraping completed successfully. The translated product data has been grouped by URL.",
+                data=grouped_list,
             )
         except Exception as e:
             return create_internal_server_error_response(exception=str(e))

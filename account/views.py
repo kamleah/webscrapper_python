@@ -86,7 +86,9 @@ class UserRegistrationView(APIView):
                 )
 
             # Validate and save user
+            print(request.data)
             user_serializer = UserRegistrationSerializer(data=request.data)
+            print(user_serializer)
             if not user_serializer.is_valid():
                 return create_bad_request_response(errors=user_serializer.errors)
 

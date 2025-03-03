@@ -26,8 +26,8 @@ SECRET_KEY = "django-insecure-@r-xxp(7cl4j7)z9ucffeo$-+nixxkr6j78^$-fhm+a1s+ipv_
 DEBUG = True
 
 ALLOWED_HOSTS = ["*"]
-CORS_ALLOWED_ORIGINS = ["http://localhost:5173"]
-CSRF_TRUSTED_ORIGINS = ["http://localhost:5173"]
+CORS_ALLOWED_ORIGINS = ["http://localhost:5173", "https://scrapper.techiebears.com"]
+CSRF_TRUSTED_ORIGINS = ["http://localhost:5173", "https://scrapper.techiebears.com"]
 CORS_ALLOW_ALL_ORIGINS = True
 
 # Application definition
@@ -88,12 +88,25 @@ WSGI_APPLICATION = "Scrapper.wsgi.application"
 # Database
 # https://docs.djangoproject.com/en/5.1/ref/settings/#databases
 
+# Local Data Base
+# DATABASES = {
+#     "default": {
+#         "ENGINE": "django.db.backends.postgresql",
+#         "NAME": "Scrapper",
+#         "USER": "postgres",
+#         "PASSWORD": "postgresql",
+#         "HOST": "127.0.0.1",
+#         "PORT": "5432",
+#     }
+# }
+
+# Live Data Base
 DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.postgresql",
-        "NAME": "Scrapper",
-        "USER": "postgres",
-        "PASSWORD": "postgresql",
+        "NAME": "scrapper",
+        "USER": "kamlesh",
+        "PASSWORD": "scrapper",
         "HOST": "127.0.0.1",
         "PORT": "5432",
     }

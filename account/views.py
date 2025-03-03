@@ -46,7 +46,9 @@ from .serializers import (
     UserViewSerializer,
     UserListViewSerializer,
     UserRegistrationSerializer,
-    RoleModelSerializer
+    RoleModelSerializer,
+    GetUserDetailSerializer,
+    PutUserDetailSerializer
 )
 
 # """ Import schema here """
@@ -91,6 +93,59 @@ class UserRegistrationView(APIView):
             user = user_serializer.save()
             return create_success_response(message="Registration successful")
 
+        except Exception as e:
+            return create_internal_server_error_response(exception=e)
+
+class UserRegistrationEditView(APIView):
+    def get(self, request, *args, **kwargs):
+        try:
+            user_id = kwargs["user_id"]
+            user_details = CustomUser.objects.get(id = user_id)
+            serialized_user_details = GetUserDetailSerializer(user_details).data
+            user_data = serialized_user_details
+            del user_data["password"]
+            del user_data["username"]
+            del user_data["is_staff"]
+            del user_data["groups"]
+            del user_data["user_permissions"]
+            return create_success_response(message="Registration successful", data=user_data)
+        except CustomUser.DoesNotExist:
+            return create_bad_request_response(errors="User Does Not Exists")
+        except Exception as e:
+            return create_internal_server_error_response(exception=e)
+    
+    def put(self, request, *args, **kwargs):
+        try:
+            user_id = kwargs["user_id"]
+            user_details = CustomUser.objects.get(id = user_id)
+            serialized_user_details = PutUserDetailSerializer(user_details, data=request.data)
+            if serialized_user_details.is_valid():
+                serialized_user_details.save()
+                user_data = serialized_user_details.data
+
+                del user_data["password"]
+                del user_data["username"]
+                del user_data["is_staff"]
+                del user_data["groups"]
+                del user_data["user_permissions"]
+
+                return create_success_response(message="User Details Update Successfull", data=user_data)
+            else:
+                return create_bad_request_response(errors=serialized_user_details.errors)
+        
+        except Exception as e:
+            return create_internal_server_error_response(exception=e)
+        
+    def delete(self, request, *args, **kwargs):
+        try:
+            user_id = kwargs["user_id"]
+            user_details = CustomUser.objects.get(id = user_id)
+            user_details.delete()
+            return create_success_response(message="User Details Deleted Successfull")
+        
+        except CustomUser.DoesNotExist:
+            return create_bad_request_response(errors="User Does Not Exists")
+        
         except Exception as e:
             return create_internal_server_error_response(exception=e)
 

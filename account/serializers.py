@@ -80,12 +80,40 @@ class UserRegistrationListSerializer(serializers.ModelSerializer):
             "process_type"
         )
 
-
+class PutUserDetailSerializer(serializers.ModelSerializer):
+    password = serializers.CharField(required=False, read_only=True)
+    username = serializers.CharField(required=False)
+    class Meta:
+        model = CustomUser
+        fields = "__all__"
 
 class RoleModelSerializer(serializers.ModelSerializer):
     class Meta:
         model = RoleModel
-        fields = ["id", "name"]  
+        fields = ["id", "name"] 
+
+class GetUserDetailSerializer(serializers.ModelSerializer):
+    password = serializers.CharField(required=False, read_only=True)
+    username = serializers.CharField(required=False)
+    user_created_by = serializers.SerializerMethodField()
+    user_role = RoleModelSerializer(read_only=True)
+
+    class Meta:
+        model = CustomUser
+        fields = "__all__"
+
+    def get_user_created_by(self, obj):
+            """Returns details of the user who created this user."""
+            if obj.user_created_by:
+                return {
+                    "id": obj.user_created_by.id,
+                    "username": obj.user_created_by.username,
+                    "email": obj.user_created_by.email,
+                    "first_name": obj.user_created_by.first_name,
+                    "last_name": obj.user_created_by.last_name,
+                }
+            return None
+        
 
 class UserListViewSerializer(serializers.ModelSerializer):
     user_created_by = serializers.SerializerMethodField()

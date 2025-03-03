@@ -1,4 +1,5 @@
 from django.shortcuts import render
+from django.db.models import Prefetch
 from rest_framework.response import Response
 from rest_framework import status
 
@@ -39,10 +40,14 @@ from .serializers import (
     UserScrapHistorySerializer,
     UserScrapHistoryListSerializer,
     ScrapTranslatedContentSerializer,
+    GetUserScrapHistoryListSerializer
 )
+
+from account.serializers import UserListViewSerializer
 
 """ Import Modals """
 from .models import UserScrapHistory, ScrapTranslatedContent
+from account.models import CustomUser
 from django.db.models import Q
 
 """ Import Django Filters """
@@ -377,7 +382,7 @@ def get_scrapper_data(url):
                 "price": product_price_text,
                 "name": product_name_text,
                 "description": product_description_text,
-                "url":url
+                "url": url,
             }
             return payload
         else:
@@ -683,11 +688,57 @@ class UserScrapperFilter(django_filters.FilterSet):
 
 @swagger_auto_schema(tags=["Search User Scrapper"])
 class UserScrapperPaginatedView(generics.ListAPIView):
-    queryset = UserScrapHistory.objects.all().order_by("-created_at")
     serializer_class = UserScrapHistoryListSerializer
     filter_backends = [DjangoFilterBackend]
     filterset_class = UserScrapperFilter
     pagination_class = BasicPagination
+
+    def get_queryset(self):
+        requested_user_id = self.request.query_params.get("user_id")
+
+        if not requested_user_id:
+            return UserScrapHistory.objects.none()
+
+        try:
+            requested_user = CustomUser.objects.get(id=requested_user_id)
+            user_serialized_data = UserListViewSerializer(requested_user).data
+
+            if user_serialized_data["user_role"]["name"] == "SuperAdmin":
+                return UserScrapHistory.objects.all().order_by("-created_at")
+            else:
+                return UserScrapHistory.objects.filter(user=requested_user).order_by(
+                    "-created_at"
+                )
+
+        except CustomUser.DoesNotExist:
+            return UserScrapHistory.objects.none()
+
+
+class DeleteHistory(APIView):
+    def get(self, request, *args, **kwargs):
+        try:
+            history_id = kwargs['history_id']
+            history_data = (
+                UserScrapHistory.objects.prefetch_related("user_scrap_history") 
+                .get(id=history_id)
+            )
+            serialized_history_data = GetUserScrapHistoryListSerializer(history_data).data
+            return create_success_response(message="History deleted successful", data=serialized_history_data)
+        except UserScrapHistory.DoesNotExist:
+            return create_bad_request_response(errors="History Does Not Exist")
+        except Exception as e:
+            return create_internal_server_error_response(exception=str(e))
+            
+    def delete(self, request, *args, **kwargs):
+        try:
+            history_id = kwargs['history_id']
+            history_data = UserScrapHistory.objects.get(id=history_id)
+            history_data.delete()
+            return create_success_response(message="History deleted successful")
+        except UserScrapHistory.DoesNotExist:
+            return create_bad_request_response(errors="History Does Not Exist")
+        except Exception as e:
+            return create_internal_server_error_response(exception=str(e))
 
 
 class TranslateContentAPI(APIView):
@@ -807,8 +858,12 @@ class GetScrapperTranslatedData(APIView):
     def get(self, request, *args, **kwargs):
         try:
             scrapped_id = kwargs["scrapped_id"]
-            scrapped_data = ScrapTranslatedContent.objects.filter(user_scrap_history=scrapped_id)
-            scrapped_data_serializer = ScrapTranslatedContentSerializer(scrapped_data, many=True).data
+            scrapped_data = ScrapTranslatedContent.objects.filter(
+                user_scrap_history=scrapped_id
+            )
+            scrapped_data_serializer = ScrapTranslatedContentSerializer(
+                scrapped_data, many=True
+            ).data
             return create_success_response(
                 message="Scraping successful",
                 data={"scraped_data": scrapped_data_serializer},

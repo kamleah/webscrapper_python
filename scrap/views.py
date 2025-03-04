@@ -854,6 +854,43 @@ def get_grouped_scraped_data(scrapped_id):
     except Exception as e:
         raise Exception(f"Error while fetching and grouping scraped data: {str(e)}")
 
+def generate_content_json(scrapped_id):
+    try:
+        translated_content_data = ScrapTranslatedContent.objects.filter(
+                user_scrap_history=scrapped_id
+            )
+
+        if not translated_content_data.exists():
+            return create_bad_request_response(errors="Invalid content_id provided")
+
+        translated_content_data_serialized = ScrapTranslatedContentSerializer(
+            translated_content_data, many=True
+        ).data
+
+        # Process content and convert to JSON
+        translated_content = [
+            {
+                **tData,
+                "content_json": convert_content_to_json_data(tData["content"]),
+            }
+            for tData in translated_content_data_serialized
+        ]
+
+        for tc in translated_content:
+            ScrapTranslatedContent.objects.filter(id=tc["id"]).update(
+                content_json=tc["content_json"]
+            )
+
+        translated_content_data = ScrapTranslatedContent.objects.filter(
+            user_scrap_history=scrapped_id
+        ).order_by("id")
+
+        translated_content_data_serialized = ScrapTranslatedContentSerializer(
+            translated_content_data, many=True
+        ).data
+    
+    except Exception as e:
+        raise Exception(f"Error while fetching and grouping scraped data: {str(e)}")
 
 class TranslateContentAPI(APIView):
     def post(self, request):
@@ -930,39 +967,7 @@ class GetTranslationResult(APIView):
     def get(self, request, *args, **kwargs):
         try:
             transalated_content_id = kwargs["transalated_content"]
-            translated_content_data = ScrapTranslatedContent.objects.filter(
-                user_scrap_history=transalated_content_id
-            )
-
-            if not translated_content_data.exists():
-                return create_bad_request_response(errors="Invalid content_id provided")
-
-            translated_content_data_serialized = ScrapTranslatedContentSerializer(
-                translated_content_data, many=True
-            ).data
-
-            # Process content and convert to JSON
-            translated_content = [
-                {
-                    **tData,
-                    "content_json": convert_content_to_json_data(tData["content"]),
-                }
-                for tData in translated_content_data_serialized
-            ]
-
-            for tc in translated_content:
-                ScrapTranslatedContent.objects.filter(id=tc["id"]).update(
-                    content_json=tc["content_json"]
-                )
-
-            translated_content_data = ScrapTranslatedContent.objects.filter(
-                user_scrap_history=transalated_content_id
-            ).order_by("id")
-
-            translated_content_data_serialized = ScrapTranslatedContentSerializer(
-                translated_content_data, many=True
-            ).data
-
+            generate_content_json(transalated_content_id)
             grouped_list = get_grouped_scraped_data(transalated_content_id)
             return create_success_response(
                 message="Translation successful", data=grouped_list
@@ -1116,6 +1121,14 @@ class DownloadScrapJson(APIView):
                     "Missing scrapped_id in request."
                 )
 
+            scrapped_translate_data = ScrapTranslatedContent.objects.filter(
+            user_scrap_history=scrapped_id)
+            scrapped_translate_data_serializer = ScrapTranslatedContentSerializer(
+            scrapped_translate_data, many=True).data
+
+            if not scrapped_translate_data_serializer[0]['content_json']:
+                generate_content_json(scrapped_id)
+            
             grouped_list = get_grouped_scraped_data(scrapped_id)
 
             return create_success_response(

@@ -86,9 +86,7 @@ class UserRegistrationView(APIView):
                 )
 
             # Validate and save user
-            print(request.data)
             user_serializer = UserRegistrationSerializer(data=request.data)
-            print(user_serializer)
             if not user_serializer.is_valid():
                 return create_bad_request_response(errors=user_serializer.errors)
 
@@ -175,12 +173,6 @@ class UserLoginView(APIView):
                     CustomUser.objects.filter(email__iexact=user.email).update(
                         last_login=timezone.now()
                     )
-
-                    # user_role = UserRoleModel.objects.filter(user__email=user.email)
-                    # if user_role.exists():
-                    #     user_data["role"] = user_role.first().role.name
-                    # else:
-                    #     user_data["role"] = "anonymous"
 
                     del user_data["password"]
                     del user_data["username"]

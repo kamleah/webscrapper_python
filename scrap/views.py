@@ -5,6 +5,7 @@ from rest_framework import status
 
 from django.utils import timezone
 from datetime import date, datetime, timedelta
+from django.utils.timezone import now
 
 import random
 import json
@@ -1135,5 +1136,41 @@ class DownloadScrapJson(APIView):
                 message="Scraping completed successfully. The translated product data has been grouped by URL.",
                 data=grouped_list,
             )
+        except Exception as e:
+            return create_internal_server_error_response(exception=str(e))
+
+
+class HistoryCleanup(APIView):
+    def post(self, request):
+        try:
+            
+            days = 30
+            cutoff_date = now() - timedelta(days=days)
+
+            # Get all UserScrapHistory records older than 30 days
+            old_histories = UserScrapHistory.objects.filter(created_at__lt=cutoff_date)
+
+            if not old_histories.exists():
+                return create_success_response(
+                    message=f"No records found older than {days} days.",
+                    data=[],
+                )
+
+            # Get all ScrapTranslatedContent linked to old histories
+            old_scrap_contents = ScrapTranslatedContent.objects.filter(
+                user_scrap_history__in=old_histories
+            )
+
+            # Delete ScrapTranslatedContent records first
+            scrap_deleted_count, _ = old_scrap_contents.delete()
+
+            # Delete UserScrapHistory records
+            history_deleted_count, _ = old_histories.delete()
+
+            return create_success_response(
+                message=f"Successfully deleted {scrap_deleted_count} scrap contents and {history_deleted_count} history records.",
+                data={"scrap_deleted_count": scrap_deleted_count, "history_deleted_count": history_deleted_count},
+            )
+
         except Exception as e:
             return create_internal_server_error_response(exception=str(e))

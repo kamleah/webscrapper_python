@@ -1404,7 +1404,7 @@ class FirecrawlAPI(APIView):
             #         "https://www.sephora.co.uk/p/RARE-BEAUTY-Positive-Light-Silky-Touch-Highlighter-28g",
             #     ],
             #     "webhook": {
-            #         "url": "https://0793-103-172-226-123.ngrok-free.app/scrap/scrapwebhook/"
+            #         "url": "https://scrapper-api.techiebears.com/scrap/scrapwebhook/"
             #     },
             # }
             # headers = {
@@ -1484,7 +1484,7 @@ def UrlScrapper(urls):
             "blockAds": True,
             "urls": urls,
             "webhook": {
-                "url": "https://0793-103-172-226-123.ngrok-free.app/scrap/scrapwebhook/"
+                "url": "https://scrapper-api.techiebears.com/scrap/scrapwebhook/"
             },
         }
         headers = {
@@ -1579,7 +1579,7 @@ def batch_url_scrapper(url, includeTags):
             "blockAds": True,
             "urls": url,
             "webhook": {
-                "url": "https://0793-103-172-226-123.ngrok-free.app/scrap/scrapwebhook/"
+                "url": "https://scrapper-api.techiebears.com/scrap/scrapwebhook/"
             },
         }
         headers = {

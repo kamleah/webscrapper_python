@@ -151,6 +151,7 @@ class UserRegistrationEditView(APIView):
 
 
 class UserLoginView(APIView):
+    permission_classes = [AllowAny]
     @swagger_auto_schema(
         tags=["Account Auth"],
         request_body=login_schema["request_body"],
@@ -221,6 +222,7 @@ class UserFilter(django_filters.FilterSet):
 
 @swagger_auto_schema(tags=["Search Users"])
 class UserPaginatedListView(generics.ListAPIView):
+    permission_classes = [AllowAny]
     queryset = CustomUser.objects.all().order_by("id")
     serializer_class = UserListViewSerializer
     filter_backends = [DjangoFilterBackend]
@@ -229,6 +231,7 @@ class UserPaginatedListView(generics.ListAPIView):
 
 
 class RoleView(APIView):
+    permission_classes = [AllowAny]
     @swagger_auto_schema(
         tags=["Account Auth"],
     )

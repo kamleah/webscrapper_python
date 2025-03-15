@@ -6,9 +6,11 @@ from rest_framework import status
 from django.utils import timezone
 from datetime import date, datetime, timedelta
 from django.utils.timezone import now
+from django.contrib.postgres.aggregates import ArrayAgg
 
 import random
 import json
+import re
 
 import requests
 from bs4 import BeautifulSoup
@@ -17,6 +19,7 @@ from bs4 import BeautifulSoup
 from rest_framework.views import APIView
 from rest_framework.pagination import PageNumberPagination
 from rest_framework import generics
+from rest_framework.permissions import AllowAny, IsAuthenticated
 
 # """ Import from Utils here """
 from utils.response import (
@@ -28,10 +31,10 @@ from utils.response import (
 from utils.helper_function import BasicPagination
 
 """ Import From Form """
-from .forms import ScrapRequestForm, TranslateContentForm
+from .forms import ScrapRequestForm, TranslateContentForm, FirecrawlScrapRequestForm, FirecrawlScrapRequestFormV2
 
 """ Import Schema """
-from .schema import request_schema
+from .schema import request_schema, firecrawler_request_schema, language_request_schema
 
 """ Import Swagger here """
 from drf_yasg.utils import swagger_auto_schema
@@ -42,12 +45,22 @@ from .serializers import (
     UserScrapHistoryListSerializer,
     ScrapTranslatedContentSerializer,
     GetUserScrapHistoryListSerializer,
+    FireCrawlScrapperModalSerializer,
+    LanguagesModalSerializers,
+    FireCrawlScrapperTranslationModalSerializers,
+    GetUserFireCrawlScrapHistoryListSerializer
 )
 
 from account.serializers import UserListViewSerializer
 
 """ Import Modals """
-from .models import UserScrapHistory, ScrapTranslatedContent
+from .models import (
+    UserScrapHistory,
+    ScrapTranslatedContent,
+    FireCrawlScrapperModal,
+    LanguagesModal,
+    FireCrawlScrapperTranslationModal,
+)
 from account.models import CustomUser
 from django.db.models import Q
 
@@ -55,13 +68,24 @@ from django.db.models import Q
 import django_filters
 from django_filters.rest_framework import DjangoFilterBackend
 
+"""Import firecrawl"""
+from firecrawl import FirecrawlApp
 
+""" Firecrawl API Key """
+app = FirecrawlApp(api_key="fc-cefe5aa0bd7f4682bbeed14226b46e26")
+
+""" Jasper API Key """
 jasper_key = (
     "api_3472BD0447F14F87BD6A61FA954A7FD2:BN41RwfWAEtGVRnF76XsgASplSd11LBuHhaHuYJKzbM="
 )
 
+# """ FireCrawl URL """
+FireCrawlURL = "https://api.firecrawl.dev/v1/batch/scrape"
+
 
 class ScrapperFunction(APIView):
+    permission_classes = [AllowAny]
+
     def get(self, request):
         url = "https://www.sephora.co.uk/p/RARE-BEAUTY-Soft-Pinch-Liquid-Blush"
 
@@ -181,6 +205,8 @@ prompt_1 = f"Translate this into {"target_language"} and don't miss any language
 
 
 class WebScrapper(APIView):
+    permission_classes = [AllowAny]
+
     def post(self, request):
         try:
             if "url" in request.data:
@@ -531,6 +557,8 @@ def convert_content_to_json_data(text):
 
 
 class WebScrapperV2(APIView):
+    permission_classes = [AllowAny]
+
     def post(self, request):
         try:
             if "url" in request.data:
@@ -564,6 +592,8 @@ class WebScrapperV2(APIView):
 
 
 class WebScrapperV3(APIView):
+    permission_classes = [AllowAny]
+
     def post(self, request):
         try:
             if "url" in request.data:
@@ -601,6 +631,7 @@ class WebScrapperV3(APIView):
 
 
 class UserScraperAPIView(APIView):
+    permission_classes = [AllowAny]
 
     @swagger_auto_schema(tags=["User Scraper"])
     def get(self, request):
@@ -671,6 +702,7 @@ class GetScrapperData(APIView):
 
 
 class UserScrapperFilter(django_filters.FilterSet):
+    permission_classes = [AllowAny]
     urls = django_filters.CharFilter(lookup_expr="icontains")
     search_keywords = django_filters.CharFilter(lookup_expr="icontains")
     metadata_fields = django_filters.CharFilter(lookup_expr="icontains")
@@ -695,6 +727,7 @@ class UserScrapperFilter(django_filters.FilterSet):
 
 @swagger_auto_schema(tags=["Search User Scrapper"])
 class UserScrapperPaginatedView(generics.ListAPIView):
+    permission_classes = [AllowAny]
     serializer_class = GetUserScrapHistoryListSerializer
     filter_backends = [DjangoFilterBackend]
     filterset_class = UserScrapperFilter
@@ -723,9 +756,13 @@ class UserScrapperPaginatedView(generics.ListAPIView):
 
         except CustomUser.DoesNotExist:
             return UserScrapHistory.objects.none()
+        
+
 
 
 class DeleteHistory(APIView):
+    permission_classes = [AllowAny]
+
     def get(self, request, *args, **kwargs):
         try:
             history_id = kwargs["history_id"]
@@ -855,11 +892,13 @@ def get_grouped_scraped_data(scrapped_id):
     except Exception as e:
         raise Exception(f"Error while fetching and grouping scraped data: {str(e)}")
 
+
 def generate_content_json(scrapped_id):
+    permission_classes = [AllowAny]
     try:
         translated_content_data = ScrapTranslatedContent.objects.filter(
-                user_scrap_history=scrapped_id
-            )
+            user_scrap_history=scrapped_id
+        )
 
         if not translated_content_data.exists():
             return create_bad_request_response(errors="Invalid content_id provided")
@@ -889,11 +928,14 @@ def generate_content_json(scrapped_id):
         translated_content_data_serialized = ScrapTranslatedContentSerializer(
             translated_content_data, many=True
         ).data
-    
+
     except Exception as e:
         raise Exception(f"Error while fetching and grouping scraped data: {str(e)}")
 
+
 class TranslateContentAPI(APIView):
+    permission_classes = [AllowAny]
+
     def post(self, request):
         try:
             data = request.data
@@ -965,6 +1007,8 @@ class TranslateContentAPI(APIView):
 
 
 class GetTranslationResult(APIView):
+    permission_classes = [AllowAny]
+
     def get(self, request, *args, **kwargs):
         try:
             transalated_content_id = kwargs["transalated_content"]
@@ -978,6 +1022,8 @@ class GetTranslationResult(APIView):
 
 
 class GetScrapperTranslatedData(APIView):
+    permission_classes = [AllowAny]
+
     def get(self, request, *args, **kwargs):
         try:
             scrapped_id = kwargs["scrapped_id"]
@@ -1010,6 +1056,24 @@ def format_content_json(content_json):
             )
         else:  # If value is a string or number, keep it as is
             formatted_data[key] = f"{key}: {value}"
+
+    return formatted_data
+
+
+def format_content_json_v2(content_json):
+    formatted_data = {}
+
+    for key, value in content_json.items():
+        if isinstance(value, list):  # If value is a list, join elements with commas
+            formatted_data[key] = f"{key}: " + ", ".join(map(str, value))
+        elif isinstance(
+            value, dict
+        ):  # If value is a dictionary, format key-value pairs
+            formatted_data[key] = f"{key}: " + ", ".join(
+                f"{sub_key}: {sub_value}" for sub_key, sub_value in value.items()
+            )
+        else:  # If value is a string or number, keep it as is
+            formatted_data[key] = f"{value}"
 
     return formatted_data
 
@@ -1058,6 +1122,8 @@ from collections import defaultdict
 
 
 class DownloadScrapJsonV2(APIView):
+    permission_classes = [AllowAny]
+
     def post(self, request):
         try:
             scrapped_id = 79
@@ -1113,6 +1179,8 @@ class DownloadScrapJsonV2(APIView):
 
 
 class DownloadScrapJson(APIView):
+    permission_classes = [AllowAny]
+
     def post(self, request):
         try:
 
@@ -1123,13 +1191,15 @@ class DownloadScrapJson(APIView):
                 )
 
             scrapped_translate_data = ScrapTranslatedContent.objects.filter(
-            user_scrap_history=scrapped_id)
+                user_scrap_history=scrapped_id
+            )
             scrapped_translate_data_serializer = ScrapTranslatedContentSerializer(
-            scrapped_translate_data, many=True).data
+                scrapped_translate_data, many=True
+            ).data
 
-            if not scrapped_translate_data_serializer[0]['content_json']:
+            if not scrapped_translate_data_serializer[0]["content_json"]:
                 generate_content_json(scrapped_id)
-            
+
             grouped_list = get_grouped_scraped_data(scrapped_id)
 
             return create_success_response(
@@ -1141,9 +1211,11 @@ class DownloadScrapJson(APIView):
 
 
 class HistoryCleanup(APIView):
+    permission_classes = [AllowAny]
+
     def post(self, request):
         try:
-            
+
             days = 30
             cutoff_date = now() - timedelta(days=days)
 
@@ -1169,8 +1241,778 @@ class HistoryCleanup(APIView):
 
             return create_success_response(
                 message=f"Successfully deleted {scrap_deleted_count} scrap contents and {history_deleted_count} history records.",
-                data={"scrap_deleted_count": scrap_deleted_count, "history_deleted_count": history_deleted_count},
+                data={
+                    "scrap_deleted_count": scrap_deleted_count,
+                    "history_deleted_count": history_deleted_count,
+                },
             )
 
         except Exception as e:
             return create_internal_server_error_response(exception=str(e))
+
+
+# languages
+
+
+class LanguageListAPI(APIView):
+    permission_classes = [IsAuthenticated]
+    """
+    API endpoint to retrieve the list of available languages.
+    """
+
+    @swagger_auto_schema(
+        tags=["Languages"],
+        operation_description="Languages",
+        responses={200: LanguagesModalSerializers(many=True)},
+    )
+    def get(self, request):
+        try:
+            languages = LanguagesModal.objects.all()
+            serialized_languages = LanguagesModalSerializers(languages, many=True).data
+            return create_success_response(
+                message="Languages retrieved successfully.",
+                data=serialized_languages,
+            )
+        except Exception as e:
+            return create_internal_server_error_response(exception=str(e))
+
+    @swagger_auto_schema(
+        tags=["Languages"],
+        operation_description="Languages",
+        responses={200: LanguagesModalSerializers(many=True)},
+        request_body=language_request_schema,
+    )
+    def post(self, request):
+        try:
+            language_name = request.data.get("name", "").strip()
+            if LanguagesModal.objects.filter(name__iexact=language_name).exists():
+                return create_bad_request_response(errors="Language already exists.")
+
+            serializer = LanguagesModalSerializers(data=request.data)
+            if serializer.is_valid():
+                serializer.save()
+                return create_success_response(
+                    message="Language created successfully.",
+                    data=serializer.data,
+                )
+            return Response(
+                {"error": serializer.errors}, status=status.HTTP_400_BAD_REQUEST
+            )
+        except Exception as e:
+            return create_internal_server_error_response(exception=str(e))
+
+
+# """ Firecrawl API Scrapper """
+
+
+def firecrawl_scrapped_data_in_json(scrap_id):
+    try:
+        scrapped_translate_data = FireCrawlScrapperTranslationModal.objects.filter(
+            firecrawl_scrapper=scrap_id
+        )
+        scrapped_translate_data_serializer = (
+            FireCrawlScrapperTranslationModalSerializers(
+                scrapped_translate_data, many=True
+            ).data
+        )
+        grouped_data = defaultdict(lambda: {"name": None, "url": None})
+
+        for scrapped_translated_data in scrapped_translate_data_serializer:
+            url = scrapped_translated_data.get("url", "N/A")  # Fallback if missing
+            name = scrapped_translated_data.get("name", "Unknown Product")
+            language = scrapped_translated_data.get("language", "unknown")
+
+            # Ensure content_json exists before processing
+            json_content = scrapped_translated_data.get("json_content", {})
+            if json_content.get("product"):
+                json_content = json_content.get("product")
+            else:
+                json_content = json_content
+
+            formatted_data = (
+                format_content_json_v2(json_content) if json_content else {}
+            )
+            # print(formatted_data)
+            formatted_data = flatten_json(formatted_data)
+
+            if not grouped_data[url]["name"]:
+                grouped_data[url]["name"] = name
+                grouped_data[url]["url"] = url
+
+            for key, value in formatted_data.items():
+                grouped_data[url][f"{language}_{key}"] = value
+
+        return list(grouped_data.values())
+    except:
+        pass
+
+
+class FirecrawlAPI(APIView):
+    def post(self, request):
+        try:
+            # code for scrap using firecrawl
+            # response = app.scrape_url(
+            #     url="https://www.sephora.co.uk/p/RARE-BEAUTY-Soft-Pinch-Liquid-Blush",
+            #     params={
+            #         "formats": ["markdown"],
+            #         "includeTags": [
+            #             ".pdp-product-brand-name",
+            #             ".Price",
+            #             ".Tabnav",
+            #         ],
+            #     },
+            # )
+
+            # Code to Extract Data
+
+            schema = {
+                "type": "object",
+                "properties": {
+                    "title": {"type": "string"},
+                    "description": {"type": "string"},
+                    "ingredients": {"type": "array", "items": {"type": "string"}},
+                    "source_url": {"type": "string"},
+                },
+                "required": ["title", "description", "ingredients"],
+            }
+
+            response = app.extract(
+                [
+                    "firecrawl.dev",
+                    "https://www.sephora.co.uk/p/RARE-BEAUTY-Soft-Pinch-Liquid-Blush",
+                ],
+                {
+                    "prompt": "need to extract this data in markdown format also",
+                    "schema": schema,
+                },
+            )
+
+            # url = "https://api.firecrawl.dev/v1/batch/scrape"
+
+            # payload = {
+            #     "ignoreInvalidURLs": False,
+            #     "formats": ["markdown"],
+            #     "onlyMainContent": True,
+            #     "waitFor": 0,
+            #     "mobile": False,
+            #     "skipTlsVerification": False,
+            #     "timeout": 30000,
+            #     "location": {"country": "IN"},
+            #     "blockAds": True,
+            #     "urls": [
+            #         "https://www.sephora.co.uk/p/RARE-BEAUTY-Soft-Pinch-Liquid-Blush",
+            #         "https://www.sephora.co.uk/p/RARE-BEAUTY-Positive-Light-Silky-Touch-Highlighter-28g",
+            #     ],
+            #     "webhook": {
+            #         "url": "https://0793-103-172-226-123.ngrok-free.app/scrap/scrapwebhook/"
+            #     },
+            # }
+            # headers = {
+            #     "Authorization": "Bearer fc-cefe5aa0bd7f4682bbeed14226b46e26",
+            #     "Content-Type": "application/json",
+            # }
+
+            # response = requests.request("POST", url, json=payload, headers=headers)
+
+            # print("response.text----->", response.text)
+
+            return create_success_response(
+                message=f"Successfully deleted.",
+                data=response,
+            )
+        except Exception as e:
+            print(e)
+            return create_internal_server_error_response(exception=str(e))
+
+
+class ScrapWebHook(APIView):
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        try:
+            data = request.query_params  # Get query parameters
+            print("Received GET request:", data)
+            return Response(
+                {"message": "GET request received", "data": data},
+                status=status.HTTP_200_OK,
+            )
+        except Exception as e:
+            print("Error in GET:", str(e))
+            return Response(
+                {"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+    def post(self, request):
+        try:
+            data = request.data
+            if data.get("data"):
+                firecrawl_scrapped_data = FireCrawlScrapperModal.objects.get(
+                    firecrawl_id=data.get("id")
+                )
+                firecrawl_scrapped_serialized_data = FireCrawlScrapperModalSerializer(
+                    firecrawl_scrapped_data
+                ).data
+                datazzz = firecrawl_scrapped_serialized_data["data"] + data.get("data")
+                filtered_firecrawl_scrapped_data = (
+                    FireCrawlScrapperModal.objects.filter(firecrawl_id=data.get("id"))
+                )
+                filtered_firecrawl_scrapped_data.update(data=datazzz)
+            return Response(
+                {"message": "POST request received", "data": data},
+                status=status.HTTP_200_OK,
+            )
+        except Exception as e:
+            return Response(
+                {"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+
+# function to scrap
+
+
+def UrlScrapper(urls):
+    try:
+        payload = {
+            "ignoreInvalidURLs": False,
+            "formats": ["markdown"],
+            "onlyMainContent": True,
+            "waitFor": 0,
+            "mobile": False,
+            "skipTlsVerification": False,
+            "timeout": 30000,
+            "location": {"country": "IN"},
+            "blockAds": True,
+            "urls": urls,
+            "webhook": {
+                "url": "https://0793-103-172-226-123.ngrok-free.app/scrap/scrapwebhook/"
+            },
+        }
+        headers = {
+            "Authorization": "Bearer fc-cefe5aa0bd7f4682bbeed14226b46e26",
+            "Content-Type": "application/json",
+        }
+        response = requests.request("POST", FireCrawlURL, json=payload, headers=headers)
+        return response.text
+    except Exception as e:
+        return create_internal_server_error_response(exception=str(e))
+
+
+def single_url_scrapper(url, includeTags):
+    try:
+        response = app.scrape_url(
+            url=url, params={"formats": ["markdown"], "includeTags": includeTags}
+        )
+        return response
+    except Exception as e:
+        return create_internal_server_error_response(exception=str(e))
+
+
+# class FirecrawlScrap(APIView):
+#     permission_classes = [IsAuthenticated]
+
+#     def get(self, request):
+#         try:
+#             print(request.user.process_type)
+#             return create_success_response(
+#                 message=f"Successfully deleted.", data="response"
+#             )
+#         except Exception as e:
+#             return create_internal_server_error_response(exception=str(e))
+
+#     def post(self, request):
+#         try:
+#             tags = [".pdp-product-brand-name", ".Price", ".Tabnav"]
+#             urls = "https://www.sephora.co.uk/p/RARE-BEAUTY-Soft-Pinch-Liquid-Blush"
+#             response = single_url_scrapper(urls, tags)
+
+#             return create_success_response(
+#                 message=f"Successfully deleted.", data=response
+#             )
+#         except Exception as e:
+#             return create_internal_server_error_response(exception=str(e))
+
+
+class FirecrawlScrap(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        try:
+            return create_success_response(
+                message="Successfully deleted.", data="response"
+            )
+        except Exception as e:
+            return create_internal_server_error_response(exception=str(e))
+
+    def post(self, request):
+        try:
+            form = FirecrawlScrapRequestForm(request.data)
+            if form.is_valid():
+                url = form.cleaned_data["url"]
+                tags = [tag.strip() for tag in form.cleaned_data["tags"].split(",")]
+
+                response = single_url_scrapper(url, tags)
+
+                return create_success_response(
+                    message="Scraping successful.", data=response
+                )
+            else:
+                return Response({"error": form.errors}, status=400)
+
+        except Exception as e:
+            return create_internal_server_error_response(exception=str(e))
+
+
+def batch_url_scrapper(url, includeTags):
+    print("url", url)
+    try:
+        urls = "https://api.firecrawl.dev/v1/batch/scrape"
+        payload = {
+            "ignoreInvalidURLs": False,
+            "formats": ["markdown"],
+            "includeTags": includeTags,
+            "onlyMainContent": True,
+            "waitFor": 0,
+            "mobile": False,
+            "skipTlsVerification": False,
+            "timeout": 30000,
+            "location": {"country": "IN"},
+            "blockAds": True,
+            "urls": url,
+            "webhook": {
+                "url": "https://0793-103-172-226-123.ngrok-free.app/scrap/scrapwebhook/"
+            },
+        }
+        headers = {
+            "Authorization": "Bearer fc-cefe5aa0bd7f4682bbeed14226b46e26",
+            "Content-Type": "application/json",
+        }
+        response = requests.request("POST", url=urls, json=payload, headers=headers)
+        return response.json()
+    except Exception as e:
+        return create_internal_server_error_response(exception=str(e))
+
+
+class FirecrawlBatchScrap(APIView):
+    permission_classes = [IsAuthenticated]
+
+    @swagger_auto_schema(tags=["Firecrawler Scraper"])
+    def get(self, request):
+        try:
+            return create_success_response(message="Successfully.", data="response")
+        except Exception as e:
+            return create_internal_server_error_response(exception=str(e))
+
+    @swagger_auto_schema(
+        tags=["Firecrawler Scraper"],
+        request_body=firecrawler_request_schema,
+    )
+    def post(self, request):
+
+        try:
+            form = FirecrawlScrapRequestForm(request.data)
+
+            if form.is_valid():
+                tags = request.data.get("tags")
+                urls = request.data.get("urls")
+
+                if isinstance(tags, str):
+                    tags = [tag.strip() for tag in tags.split(",")]
+
+                if isinstance(urls, str):
+                    urls = [url.strip() for url in urls.split(",")]
+
+                response = batch_url_scrapper(urls, tags)
+                firecrawl_data = FireCrawlScrapperModalSerializer(
+                    data={
+                        "firecrawl_id": response["id"],
+                        "data": [],
+                        "user": request.user.id,
+                        "urls": urls,
+                        "tags": tags,
+                    }
+                )
+                if firecrawl_data.is_valid():
+                    firecrawl_data.save()
+
+                    return create_success_response(
+                        message="Scraping successful.", data=firecrawl_data.data
+                    )
+                else:
+                    return create_bad_request_response(errors=firecrawl_data.errors)
+            else:
+                return create_bad_request_response(errors=form.errors)
+        except Exception as e:
+            return create_internal_server_error_response(exception=str(e))
+
+
+def generate_schemav1(required_fields):
+    """Generate a JSON Schema dynamically based on required fields."""
+    schema = {"type": "object", "properties": {}, "required": required_fields}
+
+    # Define default property types
+    default_types = {
+        "title": "string",
+        "description": "string",
+        "source_url": "string",
+        "price": "string",
+        "ingredients": {"type": "array", "items": {"type": "string"}},
+    }
+
+    # Assign properties dynamically
+    for field in required_fields:
+        schema["properties"][field] = (
+            {"type": default_types[field]}
+            if isinstance(default_types[field], str)
+            else default_types[field]
+        )
+
+    return schema
+
+
+def generate_schema(fields, required_fields):
+    """
+    Generates a valid JSON schema dynamically.
+
+    :param required_fields: List of field names.
+    :return: JSON schema dictionary.
+    """
+    schema = {"type": "object", "properties": {}, "required": []}
+
+    # Define property types dynamically
+    for field in fields:
+        if field == "ingredients":  # Ensure "ingredients" is an array
+            schema["properties"][field] = {"type": "array", "items": {"type": "string"}}
+        else:  # Default all other fields to string
+            schema["properties"][field] = {"type": "string"}
+
+    # Ensure "required" fields exist in "properties"
+    schema["required"] = required_fields
+
+    return schema
+
+
+class FirecrawlBatchScrapV2(APIView):
+    permission_classes = [IsAuthenticated]
+
+    @swagger_auto_schema(tags=["Firecrawler Scraper"])
+    def get(self, request):
+        try:
+            return create_success_response(message="Successfully.", data="response")
+        except Exception as e:
+            return create_internal_server_error_response(exception=str(e))
+
+    @swagger_auto_schema(
+        tags=["Firecrawler Scraper"],
+        request_body=firecrawler_request_schema,
+    )
+    def post(self, request):
+        try:
+            form = FirecrawlScrapRequestFormV2(request.data)
+
+            if not form.is_valid():
+                return create_bad_request_response(errors=form.errors)
+            
+            website_url = request.data.get('website_url')
+            product_names = request.data.get('product_names')
+            tags = request.data.get('tags')
+            required_tags = request.data.get('required_tags')
+
+            schemas = generate_schema(tags, required_tags)
+            scraaped_data = []
+
+            for product in product_names:
+                data = app.extract(
+                    [website_url],
+                    {
+                        "formats": ["markdown"],
+                        "prompt": f"extract the product  {product}",
+                        "schema": schemas,
+                        "enable_web_search": True,
+                    },
+                )
+                scraaped_data.append(data["data"])
+
+            firecrawl_data = FireCrawlScrapperModalSerializer(
+                data={
+                    "firecrawl_id": None,
+                    "data": scraaped_data,
+                    "user": request.user.id,
+                    "urls": website_url,
+                    "tags": tags,
+                    "name": product_names,
+                }
+            )
+            if firecrawl_data.is_valid():
+                firecrawl_data.save()
+
+                return create_success_response(
+                    message="Scraping successful.", data=firecrawl_data.data
+                )
+            else:
+                return create_bad_request_response(errors=firecrawl_data.errors)
+
+        except Exception as e:
+            return create_internal_server_error_response(exception=str(e))
+
+
+class FireCrawlScrapDetailAPIView(APIView):
+    """
+    API View to retrieve details of a FireCrawl Scraper by ID.
+    """
+
+    @swagger_auto_schema(
+        tags=["Firecrawler Scraper"],
+        # request_body=firecrawler_request_schema,
+    )
+    def get(self, request, *args, **kwargs):
+        try:
+            scrap_id = kwargs.get("scrap_id")
+            firecrawl_scrap = FireCrawlScrapperModal.objects.get(id=scrap_id)
+            serialized_data = FireCrawlScrapperModalSerializer(firecrawl_scrap).data
+
+            return create_success_response(
+                message="Scraping details retrieved successfully.", data=serialized_data
+            )
+
+        except FireCrawlScrapperModal.DoesNotExist:
+            return create_bad_request_response(errors="Scrap ID not found.")
+
+        except Exception as e:
+            print(f"Error in FireCrawlScrapDetailAPIView: {e}")
+            return create_internal_server_error_response(exception=str(e))
+
+
+class FireCrawlScrapDetailTranslateAPIView(APIView):
+    """
+    API View to retrieve details of a FireCrawl Scraper by ID.
+    """
+
+    @swagger_auto_schema(
+        tags=["Firecrawler Scraper"],
+        # request_body=firecrawler_request_schema,
+    )
+    def post(self, request, *args, **kwargs):
+        try:
+            scrap_id = request.data.get("scrap_id")
+            firecrawl_scrap = FireCrawlScrapperModal.objects.get(id=scrap_id)
+            serialized_data = FireCrawlScrapperModalSerializer(firecrawl_scrap).data
+            languages = request.data.get("languages")  # ["hindi", "english", "japanese"]
+            for scrapped_data in serialized_data["data"]:
+                for language in languages:
+                    if language != "english" or language != "English":
+                        translation_response = get_jasper_translation(
+                            str(scrapped_data), [language]
+                        )
+                        translated_text = translation_response.get("data", [{}])[0].get(
+                            "text", ""
+                        )
+                    translation_entry = {
+                        "firecrawl_scrapper": scrap_id,
+                        "language": language,
+                        "name": scrapped_data["title"],
+                        "content": (
+                            translated_text
+                            if translated_text
+                            else scrapped_data["data"]
+                        ),
+                        "url": scrapped_data["url"],
+                    }
+                    translation_serializer = (
+                        FireCrawlScrapperTranslationModalSerializers(
+                            data=translation_entry
+                        )
+                    )
+
+                    if translation_serializer.is_valid():
+                        translation_serializer.save()
+
+            scrapped_translation_data = (
+                FireCrawlScrapperTranslationModal.objects.filter(
+                    firecrawl_scrapper=scrap_id
+                )
+            )
+            scrapped_translation__serailaized_data = (
+                FireCrawlScrapperTranslationModalSerializers(
+                    scrapped_translation_data, many=True
+                ).data
+            )
+
+            return create_success_response(
+                message="Scraping details retrieved successfully.",
+                data=scrapped_translation__serailaized_data,
+            )
+
+        except FireCrawlScrapperModal.DoesNotExist:
+            return create_bad_request_response(errors="Scrap ID not found.")
+
+        except Exception as e:
+            return create_internal_server_error_response(exception=str(e))
+
+
+def markdown_to_json(md_text):
+    data = {}
+    matches = re.findall(r"\*\*(.*?)\*\*:\s*(.*)", md_text)
+
+    for key, value in matches:
+        data[key.lower()] = value.strip()
+
+    return data
+
+
+class FireCrawlTranslatedToJSONAPI(APIView):
+    @swagger_auto_schema(
+        tags=["Firecrawler Scraper"],
+        # request_body=firecrawler_request_schema,
+    )
+    def get(self, request, *args, **kwargs):
+        try:
+            scrap_id = kwargs.get("scrap_id")
+            already_exists = FireCrawlScrapperTranslationModal.objects.filter(firecrawl_scrapper=scrap_id).first()
+            al = FireCrawlScrapperTranslationModalSerializers(already_exists).data
+            print(al)
+            
+            if al['json_content']:
+                json_data = firecrawl_scrapped_data_in_json(scrap_id)
+                return create_success_response(
+                    message="Scraping details retrieved successfully.",
+                    data=json_data,
+                )
+
+            scrapped_translation_urls = (
+                FireCrawlScrapperTranslationModal.objects.filter(
+                    firecrawl_scrapper=scrap_id
+                ).aggregate(unique_urls=ArrayAgg("url", distinct=True))["unique_urls"]
+            )
+            df = FireCrawlScrapperModal.objects.get(id=scrap_id)
+            sdf = FireCrawlScrapperModalSerializer(df).data
+
+            schemas = generate_schema(sdf['tags'], sdf['tags'])
+
+            # # Ensure the result is a list and handle None case
+            scrapped_translation_urls = scrapped_translation_urls or []
+            json_response = []
+            # print(scrapped_translation_urls)
+            for translates_urls in scrapped_translation_urls:
+
+                response = app.extract(
+                    [
+                        "firecrawl.dev",
+                        translates_urls,
+                    ],
+                    {
+                        "prompt": "need to extract this data in markdown format also",
+                        "schema": schemas,
+                    },
+                )
+                json_response.append(response)
+
+                FireCrawlScrapperTranslationModal.objects.filter(
+                    firecrawl_scrapper=scrap_id, url=translates_urls, language="english"
+                ).update(json_content=response["data"])
+                scrapped_translation_data_languages = (
+                    FireCrawlScrapperTranslationModal.objects.filter(
+                        firecrawl_scrapper=scrap_id, url=translates_urls
+                    )
+                    .exclude(language__iexact="English")
+                    .values("language")
+                    .distinct()
+                )
+
+                for lang in scrapped_translation_data_languages:
+                    # print(lang['language'])
+                    payload = {
+                        "inputs": {
+                            "context": str(response["data"]),
+                            "command": f"translate this json data in language {lang['language']}",
+                        },
+                        "options": JASPER_API_OPTION,
+                    }
+
+                    response22 = requests.post(
+                        JASPER_API_URL, json=payload, headers=JASPER_API_HEADERS
+                    )
+                    response_data = response22.json()
+                    # Extract Markdown JSON from text
+                    md_text = response_data["data"][0]["text"]
+
+                    # Use regex to extract JSON inside ```json ... ```
+                    match = re.search(r"```json\n(.*?)\n```", md_text, re.DOTALL)
+
+                    if match:
+                        json_data = match.group(1)  # Extract JSON as string
+                        parsed_json = json.loads(
+                            json_data
+                        )  # Convert to Python dictionary
+
+                        parsed_json2 = json.dumps(
+                            parsed_json, indent=4, ensure_ascii=False
+                        )
+                        FireCrawlScrapperTranslationModal.objects.filter(
+                            firecrawl_scrapper=scrap_id,
+                            url=translates_urls,
+                            language=lang["language"],
+                        ).update(json_content=json.loads(parsed_json2))
+                    else:
+                        print("No JSON data found.")
+
+            json_data = firecrawl_scrapped_data_in_json(scrap_id)
+            return create_success_response(
+                message="Scraping details retrieved successfully.",
+                data=json_data,
+            )
+        except Exception as e:
+            return create_internal_server_error_response(exception=str(e))
+
+
+class UserFireCrawlScrapperFilter(django_filters.FilterSet):
+    permission_classes = [AllowAny]
+    urls = django_filters.CharFilter(lookup_expr="icontains")
+    tags = django_filters.CharFilter(lookup_expr="icontains")
+    name = django_filters.CharFilter(lookup_expr="icontains")
+    user = django_filters.CharFilter(method="filter_created_by")
+
+    class Meta:
+        model = FireCrawlScrapperModal
+        fields = ["urls", "tags", "name", "user"]
+
+    def filter_created_by(self, queryset, name, value):
+        """
+        Filter by user_created_by's email, first_name, or last_name in a single filter.
+        """
+        return queryset.filter(
+            Q(user__id__icontains=value)
+            | Q(user__email__icontains=value)
+            | Q(user__first_name__icontains=value)
+            | Q(user__last_name__icontains=value)
+        )
+@swagger_auto_schema(tags=["Search User Scrapper"])
+class UserFireCrawlScrapperPaginatedView(generics.ListAPIView):
+    permission_classes = [AllowAny]
+    serializer_class = GetUserFireCrawlScrapHistoryListSerializer
+    filter_backends = [DjangoFilterBackend]
+    filterset_class = UserFireCrawlScrapperFilter
+    pagination_class = BasicPagination
+
+    def get_queryset(self):
+        requested_user_id = self.request.query_params.get("user_id")
+
+        if not requested_user_id:
+            return FireCrawlScrapperModal.objects.none()
+
+        try:
+            requested_user = CustomUser.objects.get(id=requested_user_id)
+            user_serialized_data = UserListViewSerializer(requested_user).data
+
+            if user_serialized_data["user_role"]["name"] == "SuperAdmin":
+                return FireCrawlScrapperModal.objects.prefetch_related(
+                    "firecrawl_scrapper"
+                ).order_by("-created_at")
+            else:
+                return (
+                    FireCrawlScrapperModal.objects.filter(user=requested_user)
+                    .order_by("-created_at")
+                    .prefetch_related("firecrawl_scrapper")
+                )
+
+        except CustomUser.DoesNotExist:
+            return FireCrawlScrapperModal.objects.none()

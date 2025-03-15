@@ -22,4 +22,5 @@ urlpatterns = [
     path("firecrawl-scrap-translate/", views.FireCrawlScrapDetailTranslateAPIView.as_view(), name="firecrawl_scrap_batch"),
     path("firecrawl-scrap-translate-json/<int:scrap_id>/", views.FireCrawlTranslatedToJSONAPI.as_view(), name="firecrawl_scrap_batch"),
     path("user-firecrawl-scrap-filter/", views.UserFireCrawlScrapperPaginatedView.as_view(), name="scrapper-test"),
+    path("delete-firecrawl-history/<int:history_id>/", views.DeleteFireCrawlHistory.as_view(), name="scrapper-test"),
 ]

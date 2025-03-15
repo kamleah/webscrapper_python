@@ -76,7 +76,7 @@ class FireCrawlScrapperTranslationModal(models.Model):
     content = models.TextField(null=True, blank=True)
     firecrawl_scrapper = models.ForeignKey(
         FireCrawlScrapperModal,
-        on_delete=models.SET_NULL,
+        on_delete=models.CASCADE,
         null=True,
         blank=True,
         related_name="firecrawl_scrapper",

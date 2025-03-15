@@ -2016,3 +2016,35 @@ class UserFireCrawlScrapperPaginatedView(generics.ListAPIView):
 
         except CustomUser.DoesNotExist:
             return FireCrawlScrapperModal.objects.none()
+        
+
+class DeleteFireCrawlHistory(APIView):
+    permission_classes = [AllowAny]
+
+    def get(self, request, *args, **kwargs):
+        try:
+            history_id = kwargs["history_id"]
+            history_data = FireCrawlScrapperModal.objects.prefetch_related(
+                "firecrawl_scrapper"
+            ).get(id=history_id)
+            serialized_history_data = GetUserFireCrawlScrapHistoryListSerializer(
+                history_data
+            ).data
+            return create_success_response(
+                message="History deleted successful", data=serialized_history_data
+            )
+        except FireCrawlScrapperModal.DoesNotExist:
+            return create_bad_request_response(errors="History Does Not Exist")
+        except Exception as e:
+            return create_internal_server_error_response(exception=str(e))
+
+    def delete(self, request, *args, **kwargs):
+        try:
+            history_id = kwargs["history_id"]
+            history_data = FireCrawlScrapperModal.objects.get(id=history_id)
+            history_data.delete()
+            return create_success_response(message="History deleted successful")
+        except FireCrawlScrapperModal.DoesNotExist:
+            return create_bad_request_response(errors="History Does Not Exist")
+        except Exception as e:
+            return create_internal_server_error_response(exception=str(e))

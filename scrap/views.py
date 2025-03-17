@@ -1799,13 +1799,27 @@ class FireCrawlScrapDetailTranslateAPIView(APIView):
             languages = request.data.get("languages")  # ["hindi", "english", "japanese"]
             for scrapped_data in serialized_data["data"]:
                 for language in languages:
-                    if language != "english" or language != "English":
+                    # if language != "english" or language != "English":
+                        
+                    #     translation_response = get_jasper_translation(
+                    #         str(scrapped_data), [language]
+                    #     )
+                    #     translated_text = translation_response.get("data", [{}])[0].get(
+                    #         "text", ""
+                    #     )
+                    if language.lower() != "english":
                         translation_response = get_jasper_translation(
                             str(scrapped_data), [language]
                         )
                         translated_text = translation_response.get("data", [{}])[0].get(
                             "text", ""
                         )
+                    else:
+                       title_text = f"**Title:** {scrapped_data.get('title', 'No Title')}\n\n"
+                       price_text = f"**Price:** {scrapped_data.get('price', 'N/A')}\n\n"
+                       description_text = f"**Description:** {scrapped_data.get('description', 'No Description')}\n\n"
+                       translated_text = title_text + price_text + description_text
+                    
                     translation_entry = {
                         "firecrawl_scrapper": scrap_id,
                         "language": language,

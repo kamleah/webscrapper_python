@@ -151,6 +151,7 @@ class UserRegistrationEditView(APIView):
 
 
 class UserLoginView(APIView):
+    permission_classes = [AllowAny]
     @swagger_auto_schema(
         tags=["Account Auth"],
         request_body=login_schema["request_body"],
@@ -173,12 +174,6 @@ class UserLoginView(APIView):
                     CustomUser.objects.filter(email__iexact=user.email).update(
                         last_login=timezone.now()
                     )
-
-                    # user_role = UserRoleModel.objects.filter(user__email=user.email)
-                    # if user_role.exists():
-                    #     user_data["role"] = user_role.first().role.name
-                    # else:
-                    #     user_data["role"] = "anonymous"
 
                     del user_data["password"]
                     del user_data["username"]
@@ -227,6 +222,7 @@ class UserFilter(django_filters.FilterSet):
 
 @swagger_auto_schema(tags=["Search Users"])
 class UserPaginatedListView(generics.ListAPIView):
+    permission_classes = [AllowAny]
     queryset = CustomUser.objects.all().order_by("id")
     serializer_class = UserListViewSerializer
     filter_backends = [DjangoFilterBackend]
@@ -235,6 +231,7 @@ class UserPaginatedListView(generics.ListAPIView):
 
 
 class RoleView(APIView):
+    permission_classes = [AllowAny]
     @swagger_auto_schema(
         tags=["Account Auth"],
     )

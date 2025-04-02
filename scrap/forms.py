@@ -74,3 +74,24 @@ class TranslateContentForm(forms.Form):
         required=True,
         error_messages={"required": "At least one language must be selected."},
     )
+
+
+class FirecrawlScrapRequestForm(forms.Form):
+    urls = forms.URLField(
+        label="Website URL",
+        required=True,
+        widget=forms.URLInput(attrs={"class": "form-control", "placeholder": "Enter URL"}),
+    )
+    tags = forms.CharField(
+        label="CSS Selectors (comma-separated)",
+        required=True,
+        widget=forms.TextInput(attrs={"class": "form-control", "placeholder": "Enter CSS selectors"}),
+        help_text="Example: .pdp-product-brand-name, .Price, .Tabnav"
+    )
+
+
+class FirecrawlScrapRequestFormV2(forms.Form):
+    website_url = forms.URLField(required=True)
+    product_names = forms.JSONField(required=True)
+    tags = forms.JSONField(required=True)
+    required_tags = forms.JSONField(required=True)

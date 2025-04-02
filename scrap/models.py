@@ -39,9 +39,53 @@ class ScrapTranslatedContent(models.Model):
     content = models.TextField(null=True, blank=True)
     content_json = models.JSONField(default=dict, null=True, blank=True)
 
+    def __str__(self):
+        return f"{self.id} | {self.language} | {self.name}"
+
+
+class LanguagesModal(models.Model):
+    id = models.AutoField(primary_key=True)
+    name = models.TextField(null=False, blank=False)
+
+    def __str__(self):
+        return f"{self.id} | {self.name}"
+
+
+class FireCrawlScrapperModal(models.Model):
+    id = models.AutoField(primary_key=True)
+    urls = models.JSONField(default=list, null=True, blank=True)
+    name = models.JSONField(default=list, null=True, blank=True)
+    tags = models.JSONField(default=list, null=True, blank=True)
+    firecrawl_id = models.TextField(null=True, blank=True)
+    data = models.JSONField(default=list, null=True, blank=True)
+    original_content = models.TextField(null=True, blank=True)
+    user = models.ForeignKey(
+        CustomUser, on_delete=models.CASCADE, null=True, blank=True
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"{self.id} | {self.firecrawl_id}"
+
+
+class FireCrawlScrapperTranslationModal(models.Model):
+    id = models.AutoField(primary_key=True)
+    url = models.TextField(null=True, blank=True)
+    language = models.TextField(null=True, blank=True)
+    name = models.TextField(null=True, blank=True)
+    content = models.TextField(null=True, blank=True)
+    firecrawl_scrapper = models.ForeignKey(
+        FireCrawlScrapperModal,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="firecrawl_scrapper",
+    )
+    json_content = models.JSONField(default=dict, null=True, blank=True)
+    original_content = models.TextField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):
         return f"{self.id} | {self.language} | {self.name}"
-    
-
-

@@ -64,6 +64,7 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
             "last_name",
             "user_role",
             "user_created_by",
+            "process_type"
         )
 
 class UserRegistrationListSerializer(serializers.ModelSerializer):

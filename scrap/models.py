@@ -58,6 +58,7 @@ class FireCrawlScrapperModal(models.Model):
     tags = models.JSONField(default=list, null=True, blank=True)
     firecrawl_id = models.TextField(null=True, blank=True)
     data = models.JSONField(default=list, null=True, blank=True)
+    original_content = models.TextField(null=True, blank=True)
     user = models.ForeignKey(
         CustomUser, on_delete=models.CASCADE, null=True, blank=True
     )
@@ -82,6 +83,7 @@ class FireCrawlScrapperTranslationModal(models.Model):
         related_name="firecrawl_scrapper",
     )
     json_content = models.JSONField(default=dict, null=True, blank=True)
+    original_content = models.TextField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

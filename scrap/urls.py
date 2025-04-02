@@ -18,6 +18,7 @@ urlpatterns = [
     path("firecrawl-scrap/", views.FirecrawlScrap.as_view(), name="firecrawl_scrap"),
     path("firecrawl-scrap-batch/", views.FirecrawlBatchScrap.as_view(), name="firecrawl_scrap_batch"),
     path("firecrawl-scrap-batch-v2/", views.FirecrawlBatchScrapV2.as_view(), name="firecrawl_scrap_batch"),
+    path("firecrawl-scrap-batch-v3/", views.FirecrawlBatchScrapV3.as_view(), name="firecrawl_scrap_batch"),
     path("firecrawl-scrap/<int:scrap_id>/", views.FireCrawlScrapDetailAPIView.as_view(), name="firecrawl_scrap_batch"),
     path("firecrawl-scrap-translate/", views.FireCrawlScrapDetailTranslateAPIView.as_view(), name="firecrawl_scrap_batch"),
     path("firecrawl-scrap-translate-json/<int:scrap_id>/", views.FireCrawlTranslatedToJSONAPI.as_view(), name="firecrawl_scrap_batch"),
